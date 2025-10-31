@@ -1,0 +1,25 @@
+* {
+    color: #FDFDFD;
+    accent-color: #FF4C00;
+    /*font-family: "!!nerdFontMono!!";*/
+}
+QTitleLabel {
+    font-size: 24px;
+}
+QMainWindow {
+    background: #0B0B0B;
+}
+QMenuBar {
+    background: #282828;
+    color: #D5D5D5;
+}
+QPushButton {
+    background: #282828;
+    color: #D5D5D5;
+    border: 5px solid #282828;
+    border-radius: 7px;
+}
+QPushButton:hover {
+    background: #323232;
+    border: 5px solid #323232;
+}
