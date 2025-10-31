@@ -1,6 +1,7 @@
 from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QScreen, QFontDatabase
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QMainWindow, QDialog, QLabel, QVBoxLayout, QMessageBox
+from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QMainWindow, QDialog, QLabel, QVBoxLayout, QMessageBox, \
+    QListWidget, QLineEdit, QComboBox
 
 import backend as bck
 
@@ -56,13 +57,42 @@ class AboutWindow(QDialog):
         self.show()
 
 
-class MainWidget(QWidget):
+class UrlSelectorWidget(QWidget):
     def __init__(self, back: bck.AppBackend):
         super().__init__()
         layout = QHBoxLayout(self)
-        layout.addWidget(QPushButton("Test"))
+        self.methodSelector = QComboBox(self)
+        self.methodSelector.addItem("GET")
+        self.methodSelector.addItem("POST")
+        self.methodSelector.addItem("PUT")
+        self.methodSelector.addItem("DELETE")
+        self.methodSelector.addItem("HEAD")
+        self.methodSelector.addItem("TRACE")
+        self.methodSelector.addItem("PATCH")
+        self.methodSelector.addItem("OPTIONS")
+        layout.addWidget(self.methodSelector)
+        self.lineEdit = QLineEdit(self)
+        layout.addWidget(self.lineEdit)
+        layout.setSpacing(0)
         self.setLayout(layout)
 
+
+class MainWidget(QWidget):
+    def __init__(self, back: bck.AppBackend):
+        super().__init__()
+
+        dashboard = QWidget()
+        dashboardLayout = QVBoxLayout(dashboard)
+        dashboardLayout.addWidget(UrlSelectorWidget(back))
+        dashboardLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        dashboard.setLayout(dashboardLayout)
+
+        layout = QHBoxLayout(self)
+        self.requestList: QListWidget = QListWidget()
+        layout.addWidget(self.requestList)
+        layout.addWidget(dashboard)
+        layout.setStretchFactor(dashboard, 1)
+        self.setLayout(layout)
 
 
 class MainWindow(CustomWindow):
@@ -76,6 +106,10 @@ class MainWindow(CustomWindow):
 
         # MenuBar
         filesMenu = self.menuBar().addMenu("Файл")
+        filesMenu.addAction("Открыть...").triggered.connect(back.openFile)
+        filesMenu.addAction("Сохранить").triggered.connect(back.saveFile)
+        filesMenu.addSeparator()
+        filesMenu.addAction("Выход").triggered.connect(back.exit)
 
         secretsMenu = self.menuBar().addMenu("Секреты")
 
@@ -86,3 +120,6 @@ class MainWindow(CustomWindow):
 
         libsMenu = helpMenu.addMenu("Использованные библиотеки")
         libsMenu.addAction("PyQt6").triggered.connect(back.showQtAboutWindow)
+
+    def closeEvent(self, event: QCloseEvent):
+        self.backend.exit()

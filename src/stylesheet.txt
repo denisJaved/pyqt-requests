@@ -1,7 +1,6 @@
 * {
     color: #FDFDFD;
     accent-color: #FF4C00;
-    /*font-family: "!!nerdFontMono!!";*/
 }
 QTitleLabel {
     font-size: 24px;
@@ -22,4 +21,16 @@ QPushButton {
 QPushButton:hover {
     background: #323232;
     border: 5px solid #323232;
+}
+QLineEdit {
+    background: #282828;
+}
+UrlSelectorWidget > QComboBox {
+    border: 2px solid #282828;
+    background: #282828;
+    font-family: "!!nerdFontMono!!";
+    color: #AEFFE3;
+}
+UrlSelectorWidget > QLineEdit {
+    font-family: "!!nerdFontMono!!";
 }
