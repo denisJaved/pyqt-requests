@@ -8,5 +8,6 @@ if __name__ == "__main__":
     app_backend = backend.AppBackend()
     ex = frontend.MainWindow(app_backend)
     app_backend.application = app
+    app_backend.emitDataUpdate()
     ex.show()
     sys.exit(app.exec())

@@ -1,19 +1,26 @@
-from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QMainWindow, QDialog, QLabel, QVBoxLayout, QMessageBox, \
-    QListWidget, QLineEdit, QComboBox
+import sys
+
+from PyQt6.QtCore import QPoint, Qt, QUrl
+from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QTextDocument
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QMainWindow, QDialog, QLabel, QVBoxLayout, QMessageBox, \
+    QListWidget, QLineEdit, QComboBox, QListWidgetItem, QPushButton, QTextBrowser
 
 import backend as bck
+from backend import AppRequest
+import shared_constrains as shared_constrains
 
-about = """
-DenisJava's WebRequests - приложение с графическим интерфейсом
-для тестирования/экспериментирования с HTTP(и HTTPS) запросами.
-
-Автор: Веретенников Денис Андреевич
-"""
 
 class QTitleLabel(QLabel):
+    """
+    Label with increased font size.
+    Implemented in stylesheet.txt
+    """
     pass
+
+class LinkedListWidgetItem(QListWidgetItem):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.linkedIndex: int = -1
 
 
 class CustomWindow(QMainWindow):
@@ -35,11 +42,12 @@ class CustomWindow(QMainWindow):
         fontId = QFontDatabase.addApplicationFont("src/NerdFontMono-Light.ttf")
         if fontId >= 0:
             families = QFontDatabase.applicationFontFamilies(fontId)
-            style = style.replace("!!nerdFontMono!!", families[0])
+            style = style.replace("!!nerdFontMono!!", f"font-family: \"{families[0]}\";")
         else:
             QMessageBox.warning(self, "Внимание", "Не удалось активировать шрифт. Убедитесь, что по пути "
                                                   "src/NerdFonoMono-Light.ttf расположен рабочий шрифт"
                                                   "\nРабота будет продолжена с системным шрифтом")
+            style = style.replace("!!nerdFontMono!!", "")
         # noinspection PyUnboundLocalVariable
         self.stylesheet = style
         self.setStyleSheet(style)
@@ -53,7 +61,20 @@ class AboutWindow(QDialog):
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(QTitleLabel("DenisJava's WebRequests"))
-        layout.addWidget(QLabel(about))
+        layout.addWidget(QLabel(shared_constrains.about))
+        self.show()
+
+
+class LibraryWindow(QDialog):
+    def __init__(self, window: CustomWindow, back: bck.AppBackend, lib: str):
+        super().__init__()
+        self.setWindowTitle(f"About {lib}")
+        self.setStyleSheet(window.stylesheet)
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(QTitleLabel(lib))
+        with open(f"about/{lib}.txt", "r", encoding="utf-8") as fr:
+            layout.addWidget(QLabel(fr.read()))
         self.show()
 
 
@@ -62,37 +83,82 @@ class UrlSelectorWidget(QWidget):
         super().__init__()
         layout = QHBoxLayout(self)
         self.methodSelector = QComboBox(self)
-        self.methodSelector.addItem("GET")
-        self.methodSelector.addItem("POST")
-        self.methodSelector.addItem("PUT")
-        self.methodSelector.addItem("DELETE")
-        self.methodSelector.addItem("HEAD")
-        self.methodSelector.addItem("TRACE")
-        self.methodSelector.addItem("PATCH")
-        self.methodSelector.addItem("OPTIONS")
+        self.methodSelector.addItems(shared_constrains.http_methods)
+        self.methodSelector.currentTextChanged.connect(
+            lambda: back.updateCurrentRequest("method", self.methodSelector.currentText()))
         layout.addWidget(self.methodSelector)
         self.lineEdit = QLineEdit(self)
+        self.lineEdit.textEdited.connect(lambda: back.updateCurrentRequest("url", self.lineEdit.text()))
         layout.addWidget(self.lineEdit)
+        self.sendBtn = QPushButton("Отправить", self)
+        self.sendBtn.clicked.connect(back.sendRequest)
+        layout.addWidget(self.sendBtn)
         layout.setSpacing(0)
         self.setLayout(layout)
+
+    def emitDataUpdate(self, back: bck.AppBackend):
+        selected: AppRequest = back.model.getSelectedRequest()
+        if selected is None:
+            self.methodSelector.setCurrentIndex(0)
+            self.methodSelector.setDisabled(True)
+            self.lineEdit.setText("")
+            self.lineEdit.setDisabled(True)
+            return
+        self.methodSelector.setCurrentIndex(shared_constrains.http_methods.index(selected.method))
+        self.methodSelector.setDisabled(False)
+        self.lineEdit.setText(selected.url)
+        self.lineEdit.setDisabled(False)
+
 
 
 class MainWidget(QWidget):
     def __init__(self, back: bck.AppBackend):
         super().__init__()
 
+        self.back = back
         dashboard = QWidget()
         dashboardLayout = QVBoxLayout(dashboard)
-        dashboardLayout.addWidget(UrlSelectorWidget(back))
+        self.requestName = QLineEdit(self)
+        self.requestName.setText(shared_constrains.no_request_selected)
+        self.requestName.setObjectName("requestName")
+        self.requestName.textEdited.connect(self.requestNameChanged)
+        dashboardLayout.addWidget(self.requestName)
+        self.urlSelectorWidget: UrlSelectorWidget = UrlSelectorWidget(back)
+        dashboardLayout.addWidget(self.urlSelectorWidget)
         dashboardLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         dashboard.setLayout(dashboardLayout)
 
         layout = QHBoxLayout(self)
         self.requestList: QListWidget = QListWidget()
+        self.requestList.itemClicked.connect(lambda: back.selectRequest(self.requestList.selectedItems()))
         layout.addWidget(self.requestList)
         layout.addWidget(dashboard)
         layout.setStretchFactor(dashboard, 1)
         self.setLayout(layout)
+
+    def requestNameChanged(self):
+        selected = self.back.model.getSelectedRequest()
+        if selected is None:
+            return
+        selected.name = self.requestName.text()
+        self.updateRequestList(self.back)
+
+    def emitDataUpdate(self, back: bck.AppBackend):
+        self.updateRequestList(back)
+        selected = back.model.getSelectedRequest()
+        if selected is None:
+            self.requestName.setText(shared_constrains.no_request_selected)
+        else:
+            self.requestName.setText(selected.name)
+        self.urlSelectorWidget.emitDataUpdate(back)
+
+    def updateRequestList(self, back: bck.AppBackend):
+        self.requestList.clear()
+        self.requestList.addItem(LinkedListWidgetItem(shared_constrains.new_http_request))
+        for i, req in enumerate(back.model.requests):
+            item = LinkedListWidgetItem(req.name)
+            item.linkedIndex = i
+            self.requestList.addItem(item)
 
 
 class MainWindow(CustomWindow):
@@ -120,6 +186,19 @@ class MainWindow(CustomWindow):
 
         libsMenu = helpMenu.addMenu("Использованные библиотеки")
         libsMenu.addAction("PyQt6").triggered.connect(back.showQtAboutWindow)
+        libsMenu.addAction("requests").triggered.connect(lambda: self.libraryAbout("requests"))
+
+        self.statusBar().showMessage("")
+
+        if "-dev" in sys.argv:
+            self.statusBar().showMessage("DenisJava's WebRequests запущен в режиме разработчика")
+            back.openFile0("test.djwr")
+
+    def libraryAbout(self, lib: str):
+        LibraryWindow(self, self.backend, lib).exec()
 
     def closeEvent(self, event: QCloseEvent):
         self.backend.exit()
+
+    def emitDataUpdate(self, back: bck.AppBackend):
+        self.widget.emitDataUpdate(back)

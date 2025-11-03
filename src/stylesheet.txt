@@ -28,9 +28,17 @@ QLineEdit {
 UrlSelectorWidget > QComboBox {
     border: 2px solid #282828;
     background: #282828;
-    font-family: "!!nerdFontMono!!";
+    !!nerdFontMono!!
     color: #AEFFE3;
 }
 UrlSelectorWidget > QLineEdit {
-    font-family: "!!nerdFontMono!!";
+    !!nerdFontMono!!
+}
+QLineEdit#requestName {
+    font-size: 24px;
+    background: #0B0B0B;
+    border: none;
+}
+QStatusBar {
+    background-color: #282828;
 }
