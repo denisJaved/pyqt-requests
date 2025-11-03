@@ -1,0 +1,4 @@
+Requests is an elegant and simple HTTP library for Python, built for human beings.
+
+Copyright 2019 Kenneth Reitz.
+Licensed under APACHE-2.0.

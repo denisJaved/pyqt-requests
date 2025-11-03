@@ -1,0 +1,44 @@
+* {
+    color: #FDFDFD;
+    accent-color: #FF4C00;
+}
+QTitleLabel {
+    font-size: 24px;
+}
+QMainWindow {
+    background: #0B0B0B;
+}
+QMenuBar {
+    background: #282828;
+    color: #D5D5D5;
+}
+QPushButton {
+    background: #282828;
+    color: #D5D5D5;
+    border: 5px solid #282828;
+    border-radius: 7px;
+}
+QPushButton:hover {
+    background: #323232;
+    border: 5px solid #323232;
+}
+QLineEdit {
+    background: #282828;
+}
+UrlSelectorWidget > QComboBox {
+    border: 2px solid #282828;
+    background: #282828;
+    !!nerdFontMono!!
+    color: #AEFFE3;
+}
+UrlSelectorWidget > QLineEdit {
+    !!nerdFontMono!!
+}
+QLineEdit#requestName {
+    font-size: 24px;
+    background: #0B0B0B;
+    border: none;
+}
+QStatusBar {
+    background-color: #282828;
+}
