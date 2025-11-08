@@ -1,11 +1,11 @@
 import sys
 import base64
 
-from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtCore import QPoint, Qt, QSize
 from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QIcon, QPixmap, QImage
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QMainWindow, QLabel, QVBoxLayout, QMessageBox, \
     QListWidget, QLineEdit, QComboBox, QListWidgetItem, QPushButton, QTabWidget, QStyle, QTableView, QHeaderView, \
-    QSizePolicy, QTextBrowser, QTextEdit, QInputDialog, QFileDialog, QPlainTextEdit
+    QSizePolicy, QTextBrowser, QTextEdit, QInputDialog, QFileDialog, QPlainTextEdit, QScrollArea, QScrollBar
 
 import backend as bck
 import shared_constrains as shared_constrains
@@ -210,6 +210,9 @@ class AssetViewWidget(QWidget):
             controlsUploadFile = IconButton(QIcon("assets/uploadFile.png"))
             controlsUploadFile.clicked.connect(self.importAsset)
             controlsLayout.addWidget(controlsUploadFile)
+            controlsCreate = IconButton(QIcon("assets/create.png"))
+            controlsCreate.clicked.connect(lambda: self.updateAsset(1, ""))
+            controlsLayout.addWidget(controlsCreate)
         controlsErase = IconButton(QIcon("assets/erase.png"))
         controlsErase.clicked.connect(lambda: self.updateAsset(0, ""))
         controlsLayout.addWidget(controlsErase)
@@ -227,6 +230,7 @@ class AssetViewWidget(QWidget):
         layout.addWidget(noneDisplay)
 
         textDisplay = QPlainTextEdit(self)
+        textDisplay.setObjectName("assetTextDisplay")
         textDisplay.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         textDisplay.setReadOnly(not allowEditing)
         textDisplay.textChanged.connect(self.handleTextDisplayEdit)
@@ -238,9 +242,14 @@ class AssetViewWidget(QWidget):
         imageDisplayLayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         imageDisplayError = QLabel("Data can not be displayed as image")
         imageDisplayLayout.addWidget(imageDisplayError)
+
+        imageDisplayScroll = QScrollArea()
         imageDisplayLabel = QLabel()
+        imageDisplayLabel.setObjectName("imageDisplayScroll")
         imageDisplayLabel.setVisible(False)
-        imageDisplayLayout.addWidget(imageDisplayLabel)
+        imageDisplayScroll.setWidget(imageDisplayLabel)
+
+        imageDisplayLayout.addWidget(imageDisplayScroll)
         imageDisplay.setLayout(imageDisplayLayout)
         layout.addWidget(imageDisplay)
 
@@ -251,6 +260,7 @@ class AssetViewWidget(QWidget):
         self.displayContentWidgets = [noneDisplay, textDisplay, imageDisplay]
         self.imageDisplayError = imageDisplayError
         self.imageDisplayLabel = imageDisplayLabel
+        self.imageDisplaySroll = imageDisplayScroll
         self.emptyPixmap = QPixmap()
         self.allowEditing = allowEditing
         self.json = jsonHolder
@@ -293,7 +303,8 @@ class AssetViewWidget(QWidget):
         self.displayAssetType = assetType
         self.displayContentWidgets[1].setPlainText("Data can not be displayed as text")
         self.displayContentWidgets[1].setDisabled(True)
-        self.imageDisplayLabel.setVisible(False)
+        self.displayContentWidgets[1].setReadOnly(not self.allowEditing)
+        self.imageDisplaySroll.setVisible(False)
         self.imageDisplayLabel.setPixmap(self.emptyPixmap)
         self.imageDisplayError.setVisible(True)
         self.json.value = {"t": assetType, "d": None}
@@ -303,11 +314,24 @@ class AssetViewWidget(QWidget):
             self.json.value["d"] = data
         elif assetType == 2:
             pixmap = QPixmap()
-            pixmap.loadFromData(base64.decodebytes(data.encode(encoding="utf-8")) if json else data)
+            bytes = base64.decodebytes(data.encode(encoding="utf-8")) if json else data
+            pixmap.loadFromData(bytes)
+            print(pixmap.width(), pixmap.height())
+            if pixmap.height() < 100 or pixmap.width() < 100:
+                pixmap = pixmap.scaled(QSize(max(pixmap.width() * 2, 100), max(pixmap.height() * 2, 100)),
+                                       Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                       Qt.TransformationMode.SmoothTransformation)
+            print(pixmap.width(), pixmap.height())
             self.imageDisplayLabel.setPixmap(pixmap)
-            self.imageDisplayLabel.setVisible(True)
+            self.imageDisplayLabel.resize(self.imageDisplayLabel.sizeHint())
+            self.imageDisplaySroll.setVisible(True)
             self.imageDisplayError.setVisible(False)
             self.json.value["d"] = data if json else base64.encodebytes(data).decode(encoding="utf-8")
+            self.displayContentWidgets[1].setReadOnly(True)
+            self.displayContentWidgets[1].setDisabled(False)
+            bytes_hex = bytes.hex(sep=" ", bytes_per_sep=-4).split(" ")
+            bytes_hex = map(lambda x: " ".join(x).upper(), [bytes_hex[i : i + 6] for i in range(0, len(bytes_hex), 6)])
+            self.displayContentWidgets[1].setPlainText("\n".join(bytes_hex))
         self.switchWidget()
 
     def importJson(self, json: dict):
@@ -317,6 +341,15 @@ class AssetViewWidget(QWidget):
     def importJsonHolder(self, json: utils.Holder):
         self.json = json
         self.updateAsset(json.value["t"], json.value["d"], True)
+
+    @staticmethod
+    def getBodyToSend(json: utils.Holder) -> tuple[bytes | None, str | None]:
+        loadedAssetType = json.value["t"]
+        if loadedAssetType == 1:
+            return str(json.value["d"]).encode("utf-8"), "text/plain"
+        elif loadedAssetType == 2:
+            return base64.decodebytes(json.value["d"]), None
+        return None, None
 
 class BodyViewWidget(QTabWidget):
     def __init__(self, back: bck.AppBackend):

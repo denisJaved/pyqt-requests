@@ -86,3 +86,9 @@ QMenu {
     background-color: #3c3c3c;
     border: 1px solid #0B0B0B;
 }
+QLabel#imageDisplayScroll {
+    padding: 30px;
+}
+QPlainTextEdit#assetTextDisplay {
+    !!nerdFontMono!!
+}

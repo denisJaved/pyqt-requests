@@ -159,7 +159,11 @@ class AppRequest:
         window.statusBar().showMessage("Отправка запроса...")
         # noinspection PyBroadException
         try:
-            resp: requests.Response = requests.request(method=self.method, url=self.url, cookies=self.cookies.toJar())
+            data, dataType = _frontend.AssetViewWidget.getBodyToSend(self.requestBody)
+            if self.method == "GET":
+                pass
+            resp: requests.Response = requests.request(method=self.method, url=self.url, cookies=self.cookies.toJar(),
+                                                       data=data)
             window.statusBar().showMessage(f"Ответ на запрос получен за {round(resp.elapsed.total_seconds(), 3)} секунд")
             self.cookies.clear()
             for cookie in resp.cookies:
@@ -171,7 +175,7 @@ class AppRequest:
             try:
                 if contentType in ("image/jpeg", "image/png", "image/jpg", "image/webp"):
                     self.responseBody.value["t"] = 2
-                    self.responseBody.value["d"] = base64.encodebytes(body.decode(encoding="utf-8"))
+                    self.responseBody.value["d"] = base64.encodebytes(body).decode(encoding="ascii")
                 else:
                     self.responseBody.value["t"] = 1
                     self.responseBody.value["d"] = body.decode(encoding="utf-8")
