@@ -1,13 +1,13 @@
 import sys
 
-from PyQt6.QtCore import QPoint, Qt, QUrl
-from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QTextDocument
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QIcon
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QMainWindow, QDialog, QLabel, QVBoxLayout, QMessageBox, \
-    QListWidget, QLineEdit, QComboBox, QListWidgetItem, QPushButton, QTextBrowser
+    QListWidget, QLineEdit, QComboBox, QListWidgetItem, QPushButton, QTabWidget, QStyle, QTableView, QHeaderView
 
 import backend as bck
-from backend import AppRequest
 import shared_constrains as shared_constrains
+from backend import AppRequest
 
 
 class QTitleLabel(QLabel):
@@ -16,6 +16,14 @@ class QTitleLabel(QLabel):
     Implemented in stylesheet.txt
     """
     pass
+
+class WarningToast(QLabel):
+    """
+    QLabel for warning messages.
+    Implemented in stylesheet.txt
+    """
+    def __init__(self, text: str):
+        super().__init__(text)
 
 class LinkedListWidgetItem(QListWidgetItem):
     def __init__(self, *args):
@@ -26,56 +34,77 @@ class LinkedListWidgetItem(QListWidgetItem):
 class CustomWindow(QMainWindow):
     def __init__(self, back: bck.AppBackend):
         super().__init__()
-        # Move window to center of main screen
-        self.stylesheet = None
-        monitor = QScreen.virtualSiblings(super().screen())[0].availableGeometry()
         self.resize(1100, 800)
+        self.centerOnScreen()
+        self.loadStylesheet()
+        self.setWindowIcon(QIcon("assets/icon.png"))
+
+    def centerOnScreen(self):
+        monitor = QScreen.virtualSiblings(super().screen())[0].availableGeometry()
         self.move(QPoint(monitor.left() + monitor.width() // 2 - self.width() // 2,
                          monitor.top() + monitor.height() // 2 - self.height() // 2))
-        self.loadStylesheet()
-
 
     def loadStylesheet(self) -> None:
-        with open("src/stylesheet.txt", "r", encoding="utf-8") as fr:
+        with open("assets/stylesheet.txt", "r", encoding="utf-8") as fr:
             style = fr.read()
         # Load font
-        fontId = QFontDatabase.addApplicationFont("src/NerdFontMono-Light.ttf")
+        fontId = QFontDatabase.addApplicationFont("assets/NerdFontMono-Light.ttf")
         if fontId >= 0:
             families = QFontDatabase.applicationFontFamilies(fontId)
             style = style.replace("!!nerdFontMono!!", f"font-family: \"{families[0]}\";")
         else:
             QMessageBox.warning(self, "Внимание", "Не удалось активировать шрифт. Убедитесь, что по пути "
-                                                  "src/NerdFonoMono-Light.ttf расположен рабочий шрифт"
+                                                  "assets/NerdFonoMono-Light.ttf расположен рабочий шрифт."
                                                   "\nРабота будет продолжена с системным шрифтом")
             style = style.replace("!!nerdFontMono!!", "")
-        # noinspection PyUnboundLocalVariable
-        self.stylesheet = style
+        shared_constrains.stylesheet = style
         self.setStyleSheet(style)
 
 
-class AboutWindow(QDialog):
+class AboutWindow(CustomWindow):
     def __init__(self, window: CustomWindow, back: bck.AppBackend):
-        super().__init__()
+        super().__init__(back)
         self.setWindowTitle("About DenisJava's WebRequests")
-        self.setStyleSheet(window.stylesheet)
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(QTitleLabel("DenisJava's WebRequests"))
         layout.addWidget(QLabel(shared_constrains.about))
+        self.back = back
+        self.back.antiGC["about"] = self
+        w = QWidget()
+        w.setLayout(layout)
+        self.setCentralWidget(w)
+        self.resize(self.minimumSizeHint())
+        self.centerOnScreen()
         self.show()
 
+    def closeEvent(self, a0):
+        self.back.antiGC["about"] = None
+        super().closeEvent(a0)
 
-class LibraryWindow(QDialog):
+
+class LibraryWindow(CustomWindow):
     def __init__(self, window: CustomWindow, back: bck.AppBackend, lib: str):
-        super().__init__()
+        super().__init__(back)
         self.setWindowTitle(f"About {lib}")
-        self.setStyleSheet(window.stylesheet)
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(QTitleLabel(lib))
         with open(f"about/{lib}.txt", "r", encoding="utf-8") as fr:
             layout.addWidget(QLabel(fr.read()))
+        self.windowId = f"lib_{lib}"
+        self.back = back
+        self.back.antiGC[self.windowId] = self
+        w = QWidget()
+        w.setLayout(layout)
+        self.setCentralWidget(w)
+        self.resize(self.minimumSizeHint())
+        self.centerOnScreen()
         self.show()
+
+    def closeEvent(self, a0):
+        self.back.antiGC[self.windowId] = None
+        super().closeEvent(a0)
 
 
 class UrlSelectorWidget(QWidget):
@@ -96,8 +125,7 @@ class UrlSelectorWidget(QWidget):
         layout.setSpacing(0)
         self.setLayout(layout)
 
-    def emitDataUpdate(self, back: bck.AppBackend):
-        selected: AppRequest = back.model.getSelectedRequest()
+    def emitDataUpdate(self, back: bck.AppBackend, selected: bck.AppRequest):
         if selected is None:
             self.methodSelector.setCurrentIndex(0)
             self.methodSelector.setDisabled(True)
@@ -109,6 +137,31 @@ class UrlSelectorWidget(QWidget):
         self.lineEdit.setText(selected.url)
         self.lineEdit.setDisabled(False)
 
+
+class CookiesViewWidget(QWidget):
+    def __init__(self, back: bck.AppBackend):
+        super().__init__()
+        layout = QVBoxLayout()
+        layout.addWidget(WarningToast(shared_constrains.cookies_warning))
+        self.table = QTableView()
+        self.table.setDisabled(True)
+        self.emptyStore = bck.CookieStore()
+        self.table.setModel(self.emptyStore)
+        layout.addWidget(self.table)
+        self.setLayout(layout)
+
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(True)
+
+    def emitDataUpdate(self, back: bck.AppBackend, selected: bck.AppRequest):
+        if selected is None:
+            self.table.setDisabled(True)
+            self.table.setModel(self.emptyStore)
+        else:
+            self.table.setDisabled(False)
+            self.table.setModel(selected.cookies)
+            self.table.model().beginResetModel()
+            self.table.model().endResetModel()
 
 
 class MainWidget(QWidget):
@@ -125,6 +178,12 @@ class MainWidget(QWidget):
         dashboardLayout.addWidget(self.requestName)
         self.urlSelectorWidget: UrlSelectorWidget = UrlSelectorWidget(back)
         dashboardLayout.addWidget(self.urlSelectorWidget)
+        self.tabWidget = QTabWidget(dashboard)
+        self.tabWidget.addTab(QPushButton("Тест", self.tabWidget), "Body")
+        self.tabWidget.addTab(QPushButton("Тест 2", self.tabWidget), "Headers")
+        self.cookies = CookiesViewWidget(back)
+        self.tabWidget.addTab(self.cookies, QIcon("assets/bidirectional.png"), "Cookies")
+        dashboardLayout.addWidget(self.tabWidget)
         dashboardLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         dashboard.setLayout(dashboardLayout)
 
@@ -145,18 +204,20 @@ class MainWidget(QWidget):
 
     def emitDataUpdate(self, back: bck.AppBackend):
         self.updateRequestList(back)
-        selected = back.model.getSelectedRequest()
+        selected: bck.AppRequest = back.model.getSelectedRequest()
         if selected is None:
             self.requestName.setText(shared_constrains.no_request_selected)
         else:
             self.requestName.setText(selected.name)
-        self.urlSelectorWidget.emitDataUpdate(back)
+        self.urlSelectorWidget.emitDataUpdate(back, selected)
+        self.cookies.emitDataUpdate(back, selected)
 
     def updateRequestList(self, back: bck.AppBackend):
         self.requestList.clear()
         self.requestList.addItem(LinkedListWidgetItem(shared_constrains.new_http_request))
         for i, req in enumerate(back.model.requests):
             item = LinkedListWidgetItem(req.name)
+            item.setIcon(QIcon("assets/http.svg"))
             item.linkedIndex = i
             self.requestList.addItem(item)
 
@@ -167,15 +228,29 @@ class MainWindow(CustomWindow):
         self.setWindowTitle("DenisJava's WebRequests")
         self.widget: MainWidget = MainWidget(back)
         self.setCentralWidget(self.widget)
-        self.backend = back
-        self.backend.window = self
+        self.back = back
+        self.back.window = self
 
         # MenuBar
         filesMenu = self.menuBar().addMenu("Файл")
-        filesMenu.addAction("Открыть...").triggered.connect(back.openFile)
-        filesMenu.addAction("Сохранить").triggered.connect(back.saveFile)
+        filesMenu.addAction(self.style().standardIcon(QStyle.StandardPixmap.SP_DirOpenIcon), "Открыть...") \
+            .triggered.connect(back.openFile)
+        filesMenu.addAction(self.style().standardIcon(QStyle.StandardPixmap.SP_FileIcon), "Сохранить") \
+            .triggered.connect(back.saveFile)
         filesMenu.addSeparator()
-        filesMenu.addAction("Выход").triggered.connect(back.exit)
+        filesMenu.addAction(self.style().standardIcon(QStyle.StandardPixmap.SP_BrowserStop), "Выход") \
+            .triggered.connect(back.exit)
+
+        requestMenu = self.menuBar().addMenu("Запрос")
+
+        createRequestMenu = requestMenu.addMenu("Новый")
+        createRequestMenu.addAction("HTTP/HTTPS Запрос").triggered.connect(
+            lambda: back.handleSpecialListItem(shared_constrains.new_http_request))
+
+        requestMenu.addAction(shared_constrains.delete_request).triggered.connect(
+            lambda: back.handleSpecialListItem(shared_constrains.delete_request))
+        requestMenu.addAction(self.style().standardIcon(QStyle.StandardPixmap.SP_CommandLink), "Отправить") \
+            .triggered.connect(back.sendRequest)
 
         secretsMenu = self.menuBar().addMenu("Секреты")
 
@@ -195,10 +270,12 @@ class MainWindow(CustomWindow):
             back.openFile0("test.djwr")
 
     def libraryAbout(self, lib: str):
-        LibraryWindow(self, self.backend, lib).exec()
+        if f"lib_{lib}" in self.back.antiGC:
+            return
+        w = LibraryWindow(self, self.back, lib)
 
     def closeEvent(self, event: QCloseEvent):
-        self.backend.exit()
+        self.back.exit()
 
     def emitDataUpdate(self, back: bck.AppBackend):
         self.widget.emitDataUpdate(back)

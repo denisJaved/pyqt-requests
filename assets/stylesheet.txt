@@ -42,3 +42,37 @@ QLineEdit#requestName {
 QStatusBar {
     background-color: #282828;
 }
+QListWidget {
+    background-color: #282828;
+}
+QTabBar::tab {
+    background-color: #282828;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    border: 2px solid #282828;
+}
+QTabBar::tab:selected {
+    background-color: #3c3c3c;
+    border: 2px solid #3c3c3c;
+}
+QTabWidget {
+    background: #0B0B0B;
+}
+WarningToast {
+    background-color: #160303;
+    border: 1px solid #830000;
+    border-radius: 5px;
+}
+QTableView, QTableWidget, QTableView::section {
+    background: #0B0B0B;
+    alternate-background-color: #3c3c3c;
+    selection-color: #FDFDFD;
+    selection-background-color: #632308;
+}
+QTableView::section {
+    border: none;
+}
+QMenu {
+    background-color: #3c3c3c;
+    border: 1px solid #0B0B0B;
+}
