@@ -2,12 +2,11 @@ import sys
 
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QIcon
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QMainWindow, QDialog, QLabel, QVBoxLayout, QMessageBox, \
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QMainWindow, QLabel, QVBoxLayout, QMessageBox, \
     QListWidget, QLineEdit, QComboBox, QListWidgetItem, QPushButton, QTabWidget, QStyle, QTableView, QHeaderView
 
 import backend as bck
 import shared_constrains as shared_constrains
-from backend import AppRequest
 
 
 class QTitleLabel(QLabel):

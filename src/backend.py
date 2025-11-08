@@ -1,6 +1,5 @@
 import http.cookiejar
 import json
-import sys
 import threading
 from typing import Any
 
