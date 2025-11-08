@@ -1,12 +1,15 @@
 import sys
+import base64
 
 from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QIcon
+from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QIcon, QPixmap, QImage
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QMainWindow, QLabel, QVBoxLayout, QMessageBox, \
-    QListWidget, QLineEdit, QComboBox, QListWidgetItem, QPushButton, QTabWidget, QStyle, QTableView, QHeaderView
+    QListWidget, QLineEdit, QComboBox, QListWidgetItem, QPushButton, QTabWidget, QStyle, QTableView, QHeaderView, \
+    QSizePolicy, QTextBrowser, QTextEdit, QInputDialog, QFileDialog, QPlainTextEdit
 
 import backend as bck
 import shared_constrains as shared_constrains
+import utils
 
 
 class QTitleLabel(QLabel):
@@ -15,6 +18,15 @@ class QTitleLabel(QLabel):
     Implemented in stylesheet.txt
     """
     pass
+
+
+class IconButton(QPushButton):
+    """
+    Button that just displays icon without any text.
+    """
+    def __init__(self, icon: QIcon):
+        super().__init__(icon, "")
+
 
 class WarningToast(QLabel):
     """
@@ -163,6 +175,166 @@ class CookiesViewWidget(QWidget):
             self.table.model().endResetModel()
 
 
+class AssetViewWidget(QWidget):
+    """
+    Widget for viewing different types of data.
+    Currently, text and images.
+
+    Asset types are:
+    0 - None (empty view)
+    1 - Text
+    2 - Image
+    """
+    def __init__(self, allowEditing: bool, jsonHolder: utils.Holder):
+        super().__init__()
+        self.loadedAssetType = 0
+        self.displayAssetType = 0
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        # Controls
+        controls = QWidget()
+        controlsLayout = QHBoxLayout()
+        controlsTextType = IconButton(QIcon("assets/text.png"))
+        controlsTextType.setProperty("targetType", 1)
+        controlsTextType.clicked.connect(self.handleDisplayTypeBtn)
+        controlsLayout.addWidget(controlsTextType)
+        controlsImageType = IconButton(QIcon("assets/image.png"))
+        controlsImageType.setProperty("targetType", 2)
+        controlsImageType.clicked.connect(self.handleDisplayTypeBtn)
+        controlsLayout.addWidget(controlsImageType)
+        controlsLayout.addStretch()
+        controlsExportFile = IconButton(QIcon("assets/exportFile.png"))
+        controlsLayout.addWidget(controlsExportFile)
+        if allowEditing:
+            controlsUploadFile = IconButton(QIcon("assets/uploadFile.png"))
+            controlsUploadFile.clicked.connect(self.importAsset)
+            controlsLayout.addWidget(controlsUploadFile)
+        controlsErase = IconButton(QIcon("assets/erase.png"))
+        controlsErase.clicked.connect(lambda: self.updateAsset(0, ""))
+        controlsLayout.addWidget(controlsErase)
+        controls.setLayout(controlsLayout)
+        controlsLayout.setContentsMargins(5, 8, 5, 0)
+        layout.addWidget(controls)
+
+        # Displays
+        noneDisplay = QWidget()
+        noneDisplay.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        noneDisplayLayout = QHBoxLayout()
+        noneDisplayLayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        noneDisplayLayout.addWidget(QLabel("No data available"))
+        noneDisplay.setLayout(noneDisplayLayout)
+        layout.addWidget(noneDisplay)
+
+        textDisplay = QPlainTextEdit(self)
+        textDisplay.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        textDisplay.setReadOnly(not allowEditing)
+        textDisplay.textChanged.connect(self.handleTextDisplayEdit)
+        layout.addWidget(textDisplay)
+
+        imageDisplay = QWidget()
+        imageDisplay.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        imageDisplayLayout = QHBoxLayout()
+        imageDisplayLayout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        imageDisplayError = QLabel("Data can not be displayed as image")
+        imageDisplayLayout.addWidget(imageDisplayError)
+        imageDisplayLabel = QLabel()
+        imageDisplayLabel.setVisible(False)
+        imageDisplayLayout.addWidget(imageDisplayLabel)
+        imageDisplay.setLayout(imageDisplayLayout)
+        layout.addWidget(imageDisplay)
+
+        # Finish
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.displayTypeButtons = [None, controlsTextType, controlsImageType]
+        self.displayContentWidgets = [noneDisplay, textDisplay, imageDisplay]
+        self.imageDisplayError = imageDisplayError
+        self.imageDisplayLabel = imageDisplayLabel
+        self.emptyPixmap = QPixmap()
+        self.allowEditing = allowEditing
+        self.json = jsonHolder
+        self.switchWidget()
+
+    def handleTextDisplayEdit(self):
+        if self.loadedAssetType == 1:
+            self.json.value["d"] = self.displayContentWidgets[1].toPlainText()
+
+    def handleDisplayTypeBtn(self):
+        if self.loadedAssetType == 0:
+            self.displayAssetType = 0
+        else:
+            self.displayAssetType = self.sender().property("targetType")
+        self.switchWidget()
+
+    def switchWidget(self):
+        for i, x in enumerate(self.displayContentWidgets):
+            if x is None:
+                continue
+            x.setVisible(i == self.displayAssetType)
+
+    def importAsset(self):
+        fileName = QFileDialog.getOpenFileName(
+            self, 'Выбрать файл', '',
+            'Все файлы (*);;JPG Изображение (*.jpg);;PNG Изображение (*.png);;Текстовый файл (*.txt)')[0]
+        extension = fileName.split(".")[-1]
+        try:
+            if extension in ["jpg", "png", "jpeg", "webp", "tiff"]:
+                with open(fileName, "rb") as fr:
+                    self.updateAsset(2, fr.read())
+            else:
+                with open(fileName, "r", encoding="utf-8") as fr:
+                    self.updateAsset(1, fr.read())
+        except Exception:
+            QMessageBox.warning(self.window(), "Внимание", "Не удалось прочитать файл!")
+
+    def updateAsset(self, assetType: int, data, json=False):
+        self.loadedAssetType = assetType
+        self.displayAssetType = assetType
+        self.displayContentWidgets[1].setPlainText("Data can not be displayed as text")
+        self.displayContentWidgets[1].setDisabled(True)
+        self.imageDisplayLabel.setVisible(False)
+        self.imageDisplayLabel.setPixmap(self.emptyPixmap)
+        self.imageDisplayError.setVisible(True)
+        self.json.value = {"t": assetType, "d": None}
+        if assetType == 1:
+            self.displayContentWidgets[1].setPlainText(data)
+            self.displayContentWidgets[1].setDisabled(False)
+            self.json.value["d"] = data
+        elif assetType == 2:
+            pixmap = QPixmap()
+            pixmap.loadFromData(base64.decodebytes(data.encode(encoding="utf-8")) if json else data)
+            self.imageDisplayLabel.setPixmap(pixmap)
+            self.imageDisplayLabel.setVisible(True)
+            self.imageDisplayError.setVisible(False)
+            self.json.value["d"] = data if json else base64.encodebytes(data).decode(encoding="utf-8")
+        self.switchWidget()
+
+    def importJson(self, json: dict):
+        self.json.value = json
+        self.updateAsset(json["t"], json["d"], True)
+
+    def importJsonHolder(self, json: utils.Holder):
+        self.json = json
+        self.updateAsset(json.value["t"], json.value["d"], True)
+
+class BodyViewWidget(QTabWidget):
+    def __init__(self, back: bck.AppBackend):
+        super().__init__()
+        self.requestView = AssetViewWidget(True, utils.Holder({}))
+        self.addTab(self.requestView, QIcon("assets/request.png"), "Request")
+        self.responseView = AssetViewWidget(False, utils.Holder({}))
+        self.addTab(self.responseView, QIcon("assets/response.png"), "Response")
+
+    def emitDataUpdate(self, back: bck.AppBackend, selected: bck.AppRequest):
+        if selected is not None:
+            self.requestView.importJsonHolder(selected.requestBody)
+            self.responseView.importJsonHolder(selected.responseBody)
+        else:
+            self.requestView.updateAsset(0, "")
+            self.responseView.updateAsset(0, "")
+
+
 class MainWidget(QWidget):
     def __init__(self, back: bck.AppBackend):
         super().__init__()
@@ -178,7 +350,8 @@ class MainWidget(QWidget):
         self.urlSelectorWidget: UrlSelectorWidget = UrlSelectorWidget(back)
         dashboardLayout.addWidget(self.urlSelectorWidget)
         self.tabWidget = QTabWidget(dashboard)
-        self.tabWidget.addTab(QPushButton("Тест", self.tabWidget), "Body")
+        self.bodyView = BodyViewWidget(back)
+        self.tabWidget.addTab(self.bodyView, "Body")
         self.tabWidget.addTab(QPushButton("Тест 2", self.tabWidget), "Headers")
         self.cookies = CookiesViewWidget(back)
         self.tabWidget.addTab(self.cookies, QIcon("assets/bidirectional.png"), "Cookies")
@@ -210,6 +383,7 @@ class MainWidget(QWidget):
             self.requestName.setText(selected.name)
         self.urlSelectorWidget.emitDataUpdate(back, selected)
         self.cookies.emitDataUpdate(back, selected)
+        self.bodyView.emitDataUpdate(back, selected)
 
     def updateRequestList(self, back: bck.AppBackend):
         self.requestList.clear()

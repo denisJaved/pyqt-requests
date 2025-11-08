@@ -9,5 +9,5 @@ new_http_request = " + Новый HTTP/HTTPS запрос"
 delete_request = "Удалить выбранный запрос"
 no_request_selected = "< Выберете запрос чтобы начать"
 cookies_warning = ("Файлы cookie часто используют для аутентификации и прочих мер безопасности!\nБудьте осторожны с "
-                   "этим разделом")
+                   "этим разделом. Только файлы cookie со значением secure=false сохранены в файл запроса!")
 stylesheet = ">LOADED IN RUNTIME<"

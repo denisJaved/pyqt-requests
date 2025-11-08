@@ -2,6 +2,7 @@ import http.cookiejar
 import json
 import threading
 from typing import Any
+import base64
 
 import requests
 import requests.cookies
@@ -10,6 +11,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidgetI
 
 import frontend as _frontend
 import shared_constrains as shared_constraints
+import utils
 
 
 def noneIfStrNull(s: str) -> str | None:
@@ -26,12 +28,20 @@ class CookieStore(QAbstractTableModel):
         self.sorting: list[str] = []
         self.headers = ["Name", "Value", "Is Secure", "Version", "Domain", "Path", "Port", "Comment", "Expires", "Discard"]
 
+        if store is not None:
+            self.sorting.extend(store.keys())
+
     @staticmethod
     def fromJSON(data: dict, model):
         return CookieStore(data)
 
     def toJSON(self) -> dict:
-        return self.store
+        newStore = {}
+        for name in self.store:
+            cookie = self.store[name]
+            if not cookie[1]:
+                newStore[name] = cookie
+        return newStore
 
     def toJar(self):
         cookieJar: requests.cookies.RequestsCookieJar = requests.cookies.RequestsCookieJar()
@@ -83,6 +93,8 @@ class CookieStore(QAbstractTableModel):
                 return key if index.column() == 0 else self.store[key][index.column() - 1]
             except KeyError:
                 return "<INVALID KEY>" # Required because Qt6 sometimes calls QAbstractTableModel.data with deleted keys
+            except IndexError:
+                return "<INVALID INDEX>" # Required because Qt6 sometimes calls QAbstractTableModel.data with deleted keys
         return QVariant()
 
     def setData(self, index, value, role = Qt.ItemDataRole.EditRole):
@@ -118,6 +130,8 @@ class AppRequest:
         self.url = "http://localhost/"
         self.model = model
         self.cookies = CookieStore()
+        self.requestBody = utils.Holder({"t": 0, "d": ""})
+        self.responseBody = utils.Holder({"t": 0, "d": ""})
 
     @staticmethod
     def fromJSON(data: dict, model):
@@ -125,6 +139,8 @@ class AppRequest:
         req.method = data["m"]
         req.url = data["url"]
         req.cookies = CookieStore.fromJSON(data.get("c", {}), model)
+        req.requestBody.value = data.get("rqb", {"t": 0, "d": ""})
+        req.responseBody.value = data.get("rsb", {"t": 0, "d": ""})
         return req
 
     def toJSON(self) -> dict:
@@ -133,7 +149,9 @@ class AppRequest:
             "p": "HTTP(S)", # "p" key is reserved for future use to specify protocol of this AppRequest
             "m": self.method,
             "url": self.url,
-            "c": self.cookies.toJSON()
+            "c": self.cookies.toJSON(),
+            "rqb": self.requestBody.value,
+            "rsb": self.responseBody.value,
         }
 
     def execute(self):
@@ -148,6 +166,19 @@ class AppRequest:
                 self.cookies.addCookie(cookie.name, cookie.value, cookie.secure, cookie.version,
                                        cookie.domain, cookie.path, cookie.port,
                                        cookie.comment, cookie.expires)
+            body: bytes = resp.content
+            contentType = resp.headers.get("content-type", "text/plain")
+            try:
+                if contentType in ("image/jpeg", "image/png", "image/jpg", "image/webp"):
+                    self.responseBody.value["t"] = 2
+                    self.responseBody.value["d"] = base64.encodebytes(body.decode(encoding="utf-8"))
+                else:
+                    self.responseBody.value["t"] = 1
+                    self.responseBody.value["d"] = body.decode(encoding="utf-8")
+            except Exception as e:
+                self.responseBody.value["t"] = 1
+                self.responseBody.value["d"] = "*Failed to decode response body*"
+                print(e)
             self.model.back.emitDataUpdate()
         except requests.exceptions.ConnectionError:
             window.statusBar().showMessage("Запрос не успешен! Не удалось установить соединение с сервером.")
@@ -185,7 +216,7 @@ class AppDataModel:
         for request in self.requests:
             root["r"].append(request.toJSON())
         with open(file, "w", encoding="utf-8") as fw:
-            fw.write(json.dumps(root, indent=4))
+            fw.write(json.dumps(root, indent=0))
 
 # noinspection PyMethodMayBeStatic
 class AppBackend:
@@ -216,7 +247,7 @@ class AppBackend:
             self.model = AppDataModel.readFile(file, self)
         except KeyError:
             QMessageBox.warning(self.window, "Внимание", "Файл не совместим с этой версией DenisJava's WebRequests")
-        except IOError:
+        except Exception:
             QMessageBox.warning(self.window, "Внимание", "Не удалось прочитать файл!")
         self.emitDataUpdate()
 
@@ -227,7 +258,7 @@ class AppBackend:
         try:
             self.model.savefile(file)
             QMessageBox.information(self.window, "Операция успешна", "Файл успешно записан.")
-        except IOError:
+        except Exception:
             QMessageBox.warning(self.window, "Внимание", "Не удалось записать файл!")
         self.emitDataUpdate()
 
@@ -275,4 +306,5 @@ class AppBackend:
     def sendRequest(self):
         selected = self.model.getSelectedRequest()
         if selected is not None:
-            threading.Thread(target=selected.execute).start()
+            #threading.Thread(target=selected.execute).start()
+            selected.execute()
