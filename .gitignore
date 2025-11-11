@@ -1,5 +1,5 @@
 .idea
 .venv
 src/__pycache__
-src/NerdFontMono-Light.ttf
+assets/NerdFontMono-Light.ttf
 test.djwr
