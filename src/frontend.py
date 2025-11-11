@@ -1,11 +1,14 @@
-import sys
 import base64
+import sys
+from io import BytesIO
 
-from PyQt6.QtCore import QPoint, Qt, QSize
-from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QIcon, QPixmap, QImage
+from PyQt6.QtCore import QPoint, Qt, QSize, pyqtSignal
+from PyQt6.QtGui import QScreen, QFontDatabase, QCloseEvent, QIcon, QPixmap
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QMainWindow, QLabel, QVBoxLayout, QMessageBox, \
     QListWidget, QLineEdit, QComboBox, QListWidgetItem, QPushButton, QTabWidget, QStyle, QTableView, QHeaderView, \
-    QSizePolicy, QTextBrowser, QTextEdit, QInputDialog, QFileDialog, QPlainTextEdit, QScrollArea, QScrollBar
+    QSizePolicy, QFileDialog, QPlainTextEdit, QScrollArea
+
+from PIL import Image
 
 import backend as bck
 import shared_constrains as shared_constrains
@@ -174,8 +177,60 @@ class CookiesViewWidget(QWidget):
             self.table.model().beginResetModel()
             self.table.model().endResetModel()
 
+class HeadersViewWidget(QWidget):
+    def __init__(self, back: bck.AppBackend, isRequestSide: bool):
+        super().__init__()
+        self.isRequestSide = isRequestSide
+        layout = QVBoxLayout()
+
+        controls = QWidget()
+        controlsLayout = QHBoxLayout()
+        controlsLayout.addStretch()
+        controlsCreate = IconButton(QIcon("assets/create.png"))
+        controlsCreate.clicked.connect(self.createHandler)
+        controlsLayout.addWidget(controlsCreate)
+        controls.setLayout(controlsLayout)
+        controlsLayout.setContentsMargins(5, 8, 5, 0)
+        layout.addWidget(controls)
+
+        self.table = QTableView()
+        self.table.setDisabled(True)
+        self.emptyStore = bck.HeaderStore(False)
+        self.table.setModel(self.emptyStore)
+        layout.addWidget(self.table)
+        self.setLayout(layout)
+        self.model: bck.HeaderStore = self.emptyStore
+
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setStretchLastSection(True)
+
+    def createHandler(self):
+        self.model["..."] = "..."
+
+    def emitDataUpdate(self, back: bck.AppBackend, selected: bck.AppRequest):
+        if selected is None:
+            self.table.setDisabled(True)
+            self.table.setModel(self.emptyStore)
+        else:
+            self.table.setDisabled(False)
+            self.model = selected.requestHeaders if self.isRequestSide else selected.responseHeaders
+            self.table.setModel(self.model)
+            self.table.model().changeListener = self.changeListener
+            self.table.model().beginResetModel()
+            self.table.model().endResetModel()
+
+    def changeListener(self, model: bck.HeaderStore):
+        if model is self.table.model():
+            self.table.model().beginResetModel()
+            self.table.model().endResetModel()
+        else:
+            model.changeListener = lambda x: None
+
 
 class AssetViewWidget(QWidget):
+    # Signals
+    dataTypeChanged = pyqtSignal(int, utils.Holder)
+
     """
     Widget for viewing different types of data.
     Currently, text and images.
@@ -184,6 +239,7 @@ class AssetViewWidget(QWidget):
     0 - None (empty view)
     1 - Text
     2 - Image
+    3 - Byte data (read only)
     """
     def __init__(self, allowEditing: bool, jsonHolder: utils.Holder):
         super().__init__()
@@ -243,13 +299,26 @@ class AssetViewWidget(QWidget):
         imageDisplayError = QLabel("Data can not be displayed as image")
         imageDisplayLayout.addWidget(imageDisplayError)
 
+        imageScrollWrapper = QWidget()
+        imageScrollWrapperLayout = QVBoxLayout()
+        imageScrollWrapperLayout.setContentsMargins(0, 0, 0, 0)
+
         imageDisplayScroll = QScrollArea()
         imageDisplayLabel = QLabel()
         imageDisplayLabel.setObjectName("imageDisplayScroll")
         imageDisplayLabel.setVisible(False)
         imageDisplayScroll.setWidget(imageDisplayLabel)
+        imageScrollWrapperLayout.addWidget(imageDisplayScroll)
 
-        imageDisplayLayout.addWidget(imageDisplayScroll)
+        imageDisplayMeta = QPlainTextEdit()
+        imageDisplayMeta.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        imageDisplayMeta.setReadOnly(True)
+        imageDisplayMeta.setMaximumHeight(32)
+        imageScrollWrapperLayout.addWidget(imageDisplayMeta)
+
+        imageScrollWrapper.setLayout(imageScrollWrapperLayout)
+
+        imageDisplayLayout.addWidget(imageScrollWrapper)
         imageDisplay.setLayout(imageDisplayLayout)
         layout.addWidget(imageDisplay)
 
@@ -260,7 +329,9 @@ class AssetViewWidget(QWidget):
         self.displayContentWidgets = [noneDisplay, textDisplay, imageDisplay]
         self.imageDisplayError = imageDisplayError
         self.imageDisplayLabel = imageDisplayLabel
+        self.imageScrollWrapper = imageScrollWrapper
         self.imageDisplaySroll = imageDisplayScroll
+        self.imageDisplayMeta = imageDisplayMeta
         self.emptyPixmap = QPixmap()
         self.allowEditing = allowEditing
         self.json = jsonHolder
@@ -304,7 +375,7 @@ class AssetViewWidget(QWidget):
         self.displayContentWidgets[1].setPlainText("Data can not be displayed as text")
         self.displayContentWidgets[1].setDisabled(True)
         self.displayContentWidgets[1].setReadOnly(not self.allowEditing)
-        self.imageDisplaySroll.setVisible(False)
+        self.imageScrollWrapper.setVisible(False)
         self.imageDisplayLabel.setPixmap(self.emptyPixmap)
         self.imageDisplayError.setVisible(True)
         self.json.value = {"t": assetType, "d": None}
@@ -313,26 +384,50 @@ class AssetViewWidget(QWidget):
             self.displayContentWidgets[1].setDisabled(False)
             self.json.value["d"] = data
         elif assetType == 2:
+            # Decode bytes if input is JSON
+            imageBytes = base64.decodebytes(data.encode(encoding="utf-8")) if json else data
+
+            imageFormat = "UNKNOWN-IMAGE-FORMAT"
+            size = (-1, -1)
+            with Image.open(BytesIO(imageBytes)) as pilImage:
+                imageFormat = pilImage.format
+                size = (pilImage.width, pilImage.height)
+
+
+            # Display the image
             pixmap = QPixmap()
-            bytes = base64.decodebytes(data.encode(encoding="utf-8")) if json else data
-            pixmap.loadFromData(bytes)
-            print(pixmap.width(), pixmap.height())
+            pixmap.loadFromData(imageBytes)
             if pixmap.height() < 100 or pixmap.width() < 100:
                 pixmap = pixmap.scaled(QSize(max(pixmap.width() * 2, 100), max(pixmap.height() * 2, 100)),
                                        Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                                        Qt.TransformationMode.SmoothTransformation)
-            print(pixmap.width(), pixmap.height())
             self.imageDisplayLabel.setPixmap(pixmap)
             self.imageDisplayLabel.resize(self.imageDisplayLabel.sizeHint())
-            self.imageDisplaySroll.setVisible(True)
+            self.imageScrollWrapper.setVisible(True)
             self.imageDisplayError.setVisible(False)
+
+            # Write image to JSON
+            self.json.value["d"] = data if json else base64.encodebytes(data).decode(encoding="utf-8")
+            self.json.value["f"] = imageFormat
+
+            # Show hex representation of image
+            self.displayContentWidgets[1].setReadOnly(True)
+            self.displayContentWidgets[1].setDisabled(False)
+            bytes_hex = imageBytes.hex(sep=" ", bytes_per_sep=-4).split(" ")
+            bytes_hex = map(lambda x: " ".join(x).upper(), [bytes_hex[i : i + 6] for i in range(0, len(bytes_hex), 6)])
+            self.displayContentWidgets[1].setPlainText(f"{imageFormat} image hex representation.\n" + "\n".join(bytes_hex))
+            self.imageDisplayMeta.setPlainText(f"{imageFormat} {size[0]}x{size[1]}px image. {len(imageBytes)} bytes")
+            self.imageDisplayMeta.resize(self.imageDisplayMeta.sizeHint())
+        elif assetType == 3:
+            imageBytes = base64.decodebytes(data.encode(encoding="utf-8")) if json else data
             self.json.value["d"] = data if json else base64.encodebytes(data).decode(encoding="utf-8")
             self.displayContentWidgets[1].setReadOnly(True)
             self.displayContentWidgets[1].setDisabled(False)
-            bytes_hex = bytes.hex(sep=" ", bytes_per_sep=-4).split(" ")
-            bytes_hex = map(lambda x: " ".join(x).upper(), [bytes_hex[i : i + 6] for i in range(0, len(bytes_hex), 6)])
+            bytes_hex = imageBytes.hex(sep=" ", bytes_per_sep=-4).split(" ")
+            bytes_hex = map(lambda x: " ".join(x).upper(), [bytes_hex[i: i + 6] for i in range(0, len(bytes_hex), 6)])
             self.displayContentWidgets[1].setPlainText("\n".join(bytes_hex))
         self.switchWidget()
+        self.dataTypeChanged.emit(assetType, self.json)
 
     def importJson(self, json: dict):
         self.json.value = json
@@ -342,19 +437,13 @@ class AssetViewWidget(QWidget):
         self.json = json
         self.updateAsset(json.value["t"], json.value["d"], True)
 
-    @staticmethod
-    def getBodyToSend(json: utils.Holder) -> tuple[bytes | None, str | None]:
-        loadedAssetType = json.value["t"]
-        if loadedAssetType == 1:
-            return str(json.value["d"]).encode("utf-8"), "text/plain"
-        elif loadedAssetType == 2:
-            return base64.decodebytes(json.value["d"]), None
-        return None, None
-
 class BodyViewWidget(QTabWidget):
     def __init__(self, back: bck.AppBackend):
         super().__init__()
+        self.back = back
         self.requestView = AssetViewWidget(True, utils.Holder({}))
+        self.requestView.dataTypeChanged.connect(lambda x, y: self.back.model.getSelectedRequest()
+                                                 .setContentTypeHeader(x, y))
         self.addTab(self.requestView, QIcon("assets/request.png"), "Request")
         self.responseView = AssetViewWidget(False, utils.Holder({}))
         self.addTab(self.responseView, QIcon("assets/response.png"), "Response")
@@ -366,6 +455,19 @@ class BodyViewWidget(QTabWidget):
         else:
             self.requestView.updateAsset(0, "")
             self.responseView.updateAsset(0, "")
+
+class SidedHeadersViewWidget(QTabWidget):
+    def __init__(self, back: bck.AppBackend):
+        super().__init__()
+        self.back = back
+        self.requestView = HeadersViewWidget(back, True)
+        self.addTab(self.requestView, QIcon("assets/request.png"), "Request")
+        self.responseView = HeadersViewWidget(back, False)
+        self.addTab(self.responseView, QIcon("assets/response.png"), "Response")
+
+    def emitDataUpdate(self, back: bck.AppBackend, selected: bck.AppRequest):
+        self.requestView.emitDataUpdate(back, selected)
+        self.responseView.emitDataUpdate(back, selected)
 
 
 class MainWidget(QWidget):
@@ -385,7 +487,8 @@ class MainWidget(QWidget):
         self.tabWidget = QTabWidget(dashboard)
         self.bodyView = BodyViewWidget(back)
         self.tabWidget.addTab(self.bodyView, "Body")
-        self.tabWidget.addTab(QPushButton("Тест 2", self.tabWidget), "Headers")
+        self.sidedHeadersViewWidget = SidedHeadersViewWidget(back)
+        self.tabWidget.addTab(self.sidedHeadersViewWidget, "Headers")
         self.cookies = CookiesViewWidget(back)
         self.tabWidget.addTab(self.cookies, QIcon("assets/bidirectional.png"), "Cookies")
         dashboardLayout.addWidget(self.tabWidget)
@@ -417,6 +520,7 @@ class MainWidget(QWidget):
         self.urlSelectorWidget.emitDataUpdate(back, selected)
         self.cookies.emitDataUpdate(back, selected)
         self.bodyView.emitDataUpdate(back, selected)
+        self.sidedHeadersViewWidget.emitDataUpdate(back, selected)
 
     def updateRequestList(self, back: bck.AppBackend):
         self.requestList.clear()

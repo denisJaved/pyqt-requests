@@ -1,7 +1,7 @@
 import http.cookiejar
 import json
 import threading
-from typing import Any
+from typing import Any, overload
 import base64
 
 import requests
@@ -122,6 +122,86 @@ class CookieStore(QAbstractTableModel):
                 Qt.ItemFlag.ItemIsEnabled |
                 Qt.ItemFlag.ItemIsEditable)
 
+class HeaderStore(QAbstractTableModel):
+    def __init__(self, includeDefaults: bool):
+        super().__init__()
+        self.sorting = []
+        self.dict: dict[str, str] = {}
+        self.changeListener = lambda x: None
+        if includeDefaults:
+            self.dict["User-Agent"] = "denisjava's webrequests / 0.0.0"
+
+    def loadFrom(self, initialData):
+        self.dict.clear()
+        self.sorting.clear()
+        if initialData is not None:
+            for key in initialData:
+                self.dict[key] = initialData[key]
+                self.sorting.append(key)
+
+    def __delitem__(self, key):
+        if key in self.dict:
+            i = self.sorting.index(key)
+            self.sorting.remove(key)
+            self.dict.__delitem__(key)
+            self.changeListener(self)
+
+    def __setitem__(self, key, value):
+        if key not in self.dict:
+            self.sorting.append(key)
+        self.dict.__setitem__(key, value)
+        self.changeListener(self)
+
+    def rowCount(self, parent = None):
+        return len(self.sorting)
+
+    def columnCount(self, parent = None):
+        return 2 # Header name, Header Value
+
+    def data(self, index, role = Qt.ItemDataRole.DisplayRole):
+        if index.isValid() and (role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole)):
+            try:
+                if index.column() == 0:
+                    return self.sorting[index.row()]
+                else:
+                    return self.dict[self.sorting[index.row()]]
+            except KeyError:
+                return "<INVALID KEY>" # Required because Qt6 sometimes calls QAbstractTableModel.data with deleted keys
+            except IndexError:
+                return "<INVALID INDEX>" # Required because Qt6 sometimes calls QAbstractTableModel.data with deleted keys
+        return QVariant()
+
+    def setData(self, index, value, role = Qt.ItemDataRole.EditRole):
+        if role == Qt.ItemDataRole.EditRole and index.isValid():
+            if index.column() == 0:
+                if value == "":
+                    del self.dict[self.sorting.pop(index.row())]
+                else:
+                    oldName = self.sorting[index.row()]
+                    oldValue = self.dict[oldName]
+                    self.sorting[index.row()] = value
+                    del self.dict[oldName]
+                    self.dict[value] = oldValue
+            else:
+                self.dict[self.sorting[index.row()]] = value
+            self.dataChanged.emit(index, index, [role])
+            self.changeListener(self)
+            return True
+        return False
+
+    def headerData(self, section, orientation, role = Qt.ItemDataRole.DisplayRole):
+        if role != Qt.ItemDataRole.DisplayRole:
+            return QVariant()
+        if orientation == Qt.Orientation.Horizontal and 0 <= section < self.columnCount():
+            return ("Name", "Value")[section]
+        return section + 1
+
+    def flags(self, index):
+        if not index.isValid():
+            return Qt.ItemFlag.ItemIsEnabled
+        return (Qt.ItemFlag.ItemIsSelectable |
+                Qt.ItemFlag.ItemIsEnabled |
+                Qt.ItemFlag.ItemIsEditable)
 
 class AppRequest:
     def __init__(self, model, name: str):
@@ -132,15 +212,19 @@ class AppRequest:
         self.cookies = CookieStore()
         self.requestBody = utils.Holder({"t": 0, "d": ""})
         self.responseBody = utils.Holder({"t": 0, "d": ""})
+        self.requestHeaders = HeaderStore(True)
+        self.responseHeaders = HeaderStore(False)
 
     @staticmethod
     def fromJSON(data: dict, model):
         req = AppRequest(model, data["n"])
-        req.method = data["m"]
-        req.url = data["url"]
+        req.method = data.get("m", "GET")
+        req.url = data.get("url", "http://localhost/")
         req.cookies = CookieStore.fromJSON(data.get("c", {}), model)
         req.requestBody.value = data.get("rqb", {"t": 0, "d": ""})
         req.responseBody.value = data.get("rsb", {"t": 0, "d": ""})
+        req.requestHeaders.loadFrom(data.get("rqh", {}))
+        req.responseHeaders.loadFrom(data.get("rsh", {}))
         return req
 
     def toJSON(self) -> dict:
@@ -152,24 +236,42 @@ class AppRequest:
             "c": self.cookies.toJSON(),
             "rqb": self.requestBody.value,
             "rsb": self.responseBody.value,
+            "rqh": self.requestHeaders.dict,
+            "rsh": self.responseHeaders.dict,
         }
+
+    def setContentTypeHeader(self, dataType: int, jsonHolder: utils.Holder):
+        # ignored dataTypes 0 (no data) and 3 (read only bytes) because they can not be sent.
+        if dataType == 1:
+            self.requestHeaders["Content-Type"] = "text/plain; encoding=utf-8"
+        elif dataType == 2:
+            self.requestHeaders["Content-Type"] = "image/" + jsonHolder.value["f"].lower()
+        else:
+            del self.requestHeaders["Content-Type"]
 
     def execute(self):
         window: _frontend.MainWindow = self.model.back.window
         window.statusBar().showMessage("Отправка запроса...")
         # noinspection PyBroadException
         try:
-            data, dataType = _frontend.AssetViewWidget.getBodyToSend(self.requestBody)
-            if self.method == "GET":
-                pass
+            data = None
+            if self.method != "GET":
+                requestJson = self.requestBody.value
+                dataType = requestJson["t"]
+                # ignored dataTypes 0 (no data) and 3 (read only bytes) because they can not be sent.
+                if dataType == 1:
+                    data = str(requestJson["d"]).encode("utf-8")
+                elif dataType == 2:
+                    data = base64.decodebytes(str(requestJson["d"]).encode("ascii"))
             resp: requests.Response = requests.request(method=self.method, url=self.url, cookies=self.cookies.toJar(),
-                                                       data=data)
+                                                       data=data, headers=self.requestHeaders.dict)
             window.statusBar().showMessage(f"Ответ на запрос получен за {round(resp.elapsed.total_seconds(), 3)} секунд")
             self.cookies.clear()
             for cookie in resp.cookies:
                 self.cookies.addCookie(cookie.name, cookie.value, cookie.secure, cookie.version,
                                        cookie.domain, cookie.path, cookie.port,
                                        cookie.comment, cookie.expires)
+            self.responseHeaders.loadFrom(resp.headers)
             body: bytes = resp.content
             contentType = resp.headers.get("content-type", "text/plain")
             try:
@@ -177,8 +279,13 @@ class AppRequest:
                     self.responseBody.value["t"] = 2
                     self.responseBody.value["d"] = base64.encodebytes(body).decode(encoding="ascii")
                 else:
-                    self.responseBody.value["t"] = 1
-                    self.responseBody.value["d"] = body.decode(encoding="utf-8")
+                    try:
+                        self.responseBody.value["t"] = 1
+                        self.responseBody.value["d"] = body.decode(encoding="utf-8", errors="strict")
+                    except UnicodeDecodeError as e:
+                        self.responseBody.value["t"] = 3
+                        self.responseBody.value["d"] = base64.encodebytes(body).decode(encoding="ascii", errors="strict")
+                        print(e)
             except Exception as e:
                 self.responseBody.value["t"] = 1
                 self.responseBody.value["d"] = "*Failed to decode response body*"
