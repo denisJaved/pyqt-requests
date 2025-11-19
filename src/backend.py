@@ -1,17 +1,15 @@
+import base64
 import http.cookiejar
 import json
-import threading
-from typing import Any, overload
-import base64
+from typing import Any
 
 import requests
 import requests.cookies
 from PyQt6.QtCore import QAbstractTableModel, Qt, QVariant
 from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidgetItem
 
-import frontend as _frontend
-import shared_constrains as shared_constraints
-import utils
+import src.shared_constrains as shared_constraints
+import src.utils as utils
 
 
 def noneIfStrNull(s: str) -> str | None:
@@ -250,7 +248,7 @@ class AppRequest:
             del self.requestHeaders["Content-Type"]
 
     def execute(self):
-        window: _frontend.MainWindow = self.model.back.window
+        window = self.model.back.window
         window.statusBar().showMessage("Отправка запроса...")
         # noinspection PyBroadException
         try:
@@ -332,20 +330,13 @@ class AppDataModel:
 # noinspection PyMethodMayBeStatic
 class AppBackend:
     def __init__(self):
-        self.window: _frontend.MainWindow | None = None
+        self.window = None
         self.application: QApplication | None = None
         self.model = AppDataModel(self)
         self.antiGC: dict[str, Any] = {}
 
     def showQtAboutWindow(self):
         self.application.aboutQt()
-
-    def showAboutWindow(self):
-        if "about" in self.antiGC:
-            return
-        window = _frontend.AboutWindow(self.window, self)
-        self.antiGC["about"] = window
-        window.show()
 
     def openFile(self):
         file = QFileDialog.getOpenFileName(
@@ -386,11 +377,11 @@ class AppBackend:
         """
         self.window.emitDataUpdate(self)
 
-    def selectRequest(self, items: list[QListWidgetItem]):
+    def selectRequest(self, items):
         if len(items) == 0:
             return
         # noinspection PyTypeChecker
-        item: _frontend.LinkedListWidgetItem = items[0]
+        item = items[0]
         if item.linkedIndex == -1:
             # linkedIndex is -1, so this item is not linked to AppRequest
             self.handleSpecialListItem(item.text())
@@ -400,11 +391,11 @@ class AppBackend:
             self.emitDataUpdate()
 
     def handleSpecialListItem(self, itemText: str):
-        if itemText == shared_constraints.new_http_request:
+        if itemText == shared_constraints.NEW_HTTP_REQUEST:
             self.model.selectedRequest = len(self.model.requests)
             req: AppRequest = AppRequest(self.model, "Новый запрос")
             self.model.requests.append(req)
-        elif itemText == shared_constraints.delete_request:
+        elif itemText == shared_constraints.DELETE_REQUEST:
             self.model.requests.pop(self.model.selectedRequest)
             self.model.selectedRequest = max(0, self.model.selectedRequest - 1)
         self.emitDataUpdate()
