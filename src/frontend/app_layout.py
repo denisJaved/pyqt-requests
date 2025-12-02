@@ -2,61 +2,47 @@ import sys
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon, QCloseEvent
-from PyQt6.QtWidgets import QVBoxLayout, QLabel, QWidget, QHBoxLayout, QComboBox, QLineEdit, QPushButton, QTableView, \
-    QHeaderView, QTabWidget, QListWidget, QStyle
+from PyQt6.QtWidgets import QVBoxLayout, QWidget, QHBoxLayout, QComboBox, QLineEdit, QPushButton, QTableView, \
+    QHeaderView, QTabWidget, QListWidget, QStyle, QLabel
 
 from src import backend as bck, shared_constrains as shared_constrains, utils
-from src.frontend.app_components import CustomWindow, QTitleLabel, WarningToast, IconButton, AssetViewWidget, \
+from src.frontend.app_about import AboutWindow, InfoWindow
+from src.frontend.app_components import CustomWindow, WarningToast, IconButton, AssetViewWidget, \
     LinkedListWidgetItem
 
-
-class AboutWindow(CustomWindow):
-    def __init__(self, window: CustomWindow, back: bck.AppBackend):
-        super().__init__(back)
-        self.setWindowTitle("About DenisJava's WebRequests")
-        layout = QVBoxLayout()
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(QTitleLabel("DenisJava's WebRequests"))
-        layout.addWidget(QLabel(shared_constrains.ABOUT))
-        self.back = back
-        self.back.antiGC["about"] = self
-        w = QWidget()
-        w.setLayout(layout)
-        self.setCentralWidget(w)
-        self.resize(self.minimumSizeHint())
-        self.centerOnScreen()
-        self.show()
-
-    def closeEvent(self, a0):
-        self.back.antiGC["about"] = None
-        super().closeEvent(a0)
-
-
-class LibraryWindow(CustomWindow):
-    def __init__(self, window: CustomWindow, back: bck.AppBackend, lib: str):
-        super().__init__(back)
-        self.setWindowTitle(f"About {lib}")
-        layout = QVBoxLayout()
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(QTitleLabel(lib))
-        with open(f"about/{lib}.txt", "r", encoding="utf-8") as fr:
-            layout.addWidget(QLabel(fr.read()))
-        self.windowId = f"lib_{lib}"
-        self.back = back
-        self.back.antiGC[self.windowId] = self
-        w = QWidget()
-        w.setLayout(layout)
-        self.setCentralWidget(w)
-        self.resize(self.minimumSizeHint())
-        self.centerOnScreen()
-        self.show()
-
-    def closeEvent(self, a0):
-        self.back.antiGC[self.windowId] = None
-        super().closeEvent(a0)
-
+# Window UI Layout:
+#
+# ┌──[ DenisJava's WebRequests ]───────────────[-]─[□]─[⨯]─┐
+# │░File░Request░...░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ <-- QMenuBar (defined in MainWindow)
+# │┌───────┐                                               │
+# ││+ HTTP │   Request name <---------------------------------- QLineEdit (defined in MainWidget)
+# ││...    │   [ GET ↓][https://example.com________][send]  <-- UrlSelectorWidget
+# ││...    │   [Body][Headers][Cookie]                     │
+# ││       │   ┌─────────────────────────────────────────┐ │
+# ││       │   │                                         │  <-- QTabWidget (defined in MainWidget)
+# ││       │   │                                         │ │    (Read more about tabs below)
+# ││       │   │                                         │ │
+# ││       │   │                                         │ │
+# ││       │   │                                         │ │
+# │└───────┘   └─────────────────────────────────────────┘ │
+# └─ ^ ────────────────────────────────────────────────────┘
+#    └ QListWidget (defined in MainWidget)
+#
+# Tabs in QTabWidget:
+#     [Body]    : Contains two own tabs inside for request and response data.
+#                 Each tab is filled with AssetViewWidget (app_components.py)
+#
+#     [Headers] : Contains two own tabs inside for request and response data.
+#                 Each tab is filled with HeadersViewWidget
+#
+#     [Cookies] : Filled with CookiesViewWidget
+#
+# NOTICE: About windows defined in src.app_about
 
 class UrlSelectorWidget(QWidget):
+    """
+    UrlSelectorWidget manages HTTP method selector, url's QLineEdit and submit button
+    """
     def __init__(self, back: bck.AppBackend):
         super().__init__()
         layout = QHBoxLayout(self)
@@ -88,6 +74,9 @@ class UrlSelectorWidget(QWidget):
 
 
 class CookiesViewWidget(QWidget):
+    """
+    Displays cookies. This is widget is not request-response sided.
+    """
     def __init__(self, back: bck.AppBackend):
         super().__init__()
         layout = QVBoxLayout()
@@ -113,7 +102,34 @@ class CookiesViewWidget(QWidget):
             self.table.model().endResetModel()
 
 
+class BodyViewWidget(QTabWidget):
+    """
+    Handles request and response side of HTTP body displays.
+    AssetViewWidget is used to display contents of HTTP bodies.
+    """
+    def __init__(self, back: bck.AppBackend):
+        super().__init__()
+        self.back = back
+        self.requestView = AssetViewWidget(True, utils.Holder({}))
+        self.requestView.dataTypeChanged.connect(lambda x, y: self.back.model.getSelectedRequest()
+                                                 .setContentTypeHeader(x, y))
+        self.addTab(self.requestView, QIcon("assets/request.png"), "Request")
+        self.responseView = AssetViewWidget(False, utils.Holder({}))
+        self.addTab(self.responseView, QIcon("assets/response.png"), "Response")
+
+    def emitDataUpdate(self, back: bck.AppBackend, selected: bck.AppRequest):
+        if selected is not None:
+            self.requestView.importJsonHolder(selected.requestBody)
+            self.responseView.importJsonHolder(selected.responseBody)
+        else:
+            self.requestView.updateAsset(0, "")
+            self.responseView.updateAsset(0, "")
+
+
 class HeadersViewWidget(QWidget):
+    """
+    Table for viewing and editing HTTP headers
+    """
     def __init__(self, back: bck.AppBackend, isRequestSide: bool):
         super().__init__()
         self.isRequestSide = isRequestSide
@@ -122,9 +138,10 @@ class HeadersViewWidget(QWidget):
         controls = QWidget()
         controlsLayout = QHBoxLayout()
         controlsLayout.addStretch()
-        controlsCreate = IconButton(QIcon("assets/create.png"))
-        controlsCreate.clicked.connect(self.createHandler)
-        controlsLayout.addWidget(controlsCreate)
+        if isRequestSide:
+            controlsCreate = IconButton(QIcon("assets/create.png"))
+            controlsCreate.clicked.connect(self.createHandler)
+            controlsLayout.addWidget(controlsCreate)
         controls.setLayout(controlsLayout)
         controlsLayout.setContentsMargins(5, 8, 5, 0)
         layout.addWidget(controls)
@@ -163,27 +180,10 @@ class HeadersViewWidget(QWidget):
             model.changeListener = lambda x: None
 
 
-class BodyViewWidget(QTabWidget):
-    def __init__(self, back: bck.AppBackend):
-        super().__init__()
-        self.back = back
-        self.requestView = AssetViewWidget(True, utils.Holder({}))
-        self.requestView.dataTypeChanged.connect(lambda x, y: self.back.model.getSelectedRequest()
-                                                 .setContentTypeHeader(x, y))
-        self.addTab(self.requestView, QIcon("assets/request.png"), "Request")
-        self.responseView = AssetViewWidget(False, utils.Holder({}))
-        self.addTab(self.responseView, QIcon("assets/response.png"), "Response")
-
-    def emitDataUpdate(self, back: bck.AppBackend, selected: bck.AppRequest):
-        if selected is not None:
-            self.requestView.importJsonHolder(selected.requestBody)
-            self.responseView.importJsonHolder(selected.responseBody)
-        else:
-            self.requestView.updateAsset(0, "")
-            self.responseView.updateAsset(0, "")
-
-
 class SidedHeadersViewWidget(QTabWidget):
+    """
+    Handles request and response side of HeadersViewWidget
+    """
     def __init__(self, back: bck.AppBackend):
         super().__init__()
         self.back = back
@@ -198,17 +198,32 @@ class SidedHeadersViewWidget(QTabWidget):
 
 
 class MainWidget(QWidget):
+    """
+    Main widget of MainWindow.
+    Check line 13 for more information.
+    """
     def __init__(self, back: bck.AppBackend):
         super().__init__()
 
         self.back = back
         dashboard = QWidget()
         dashboardLayout = QVBoxLayout(dashboard)
+
+        requestNameWrapper = QWidget()
+        requestNameWrapperLayout = QHBoxLayout()
+        requestNameWrapper.setLayout(requestNameWrapperLayout)
+
         self.requestName = QLineEdit(self)
         self.requestName.setText(shared_constrains.NO_REQUEST_SELECTED)
         self.requestName.setObjectName("requestName")
         self.requestName.textEdited.connect(self.requestNameChanged)
-        dashboardLayout.addWidget(self.requestName)
+        requestNameWrapperLayout.addWidget(self.requestName)
+
+        self.statusCode = QLabel()
+        self.statusCode.setObjectName("statusCode")
+        requestNameWrapperLayout.addWidget(self.statusCode)
+
+        dashboardLayout.addWidget(requestNameWrapper)
         self.urlSelectorWidget: UrlSelectorWidget = UrlSelectorWidget(back)
         dashboardLayout.addWidget(self.urlSelectorWidget)
         self.tabWidget = QTabWidget(dashboard)
@@ -242,8 +257,10 @@ class MainWidget(QWidget):
         selected: bck.AppRequest = back.model.getSelectedRequest()
         if selected is None:
             self.requestName.setText(shared_constrains.NO_REQUEST_SELECTED)
+            self.statusCode.setText("XXX")
         else:
             self.requestName.setText(selected.name)
+            self.statusCode.setText(selected.statusCode)
         self.urlSelectorWidget.emitDataUpdate(back, selected)
         self.cookies.emitDataUpdate(back, selected)
         self.bodyView.emitDataUpdate(back, selected)
@@ -260,6 +277,9 @@ class MainWidget(QWidget):
 
 
 class MainWindow(CustomWindow):
+    """
+    Windows that shows all the requests
+    """
     def __init__(self, back: bck.AppBackend):
         super().__init__(back)
         self.setWindowTitle("DenisJava's WebRequests")
@@ -299,6 +319,9 @@ class MainWindow(CustomWindow):
         libsMenu = helpMenu.addMenu("Использованные библиотеки")
         libsMenu.addAction("PyQt6").triggered.connect(back.showQtAboutWindow)
         libsMenu.addAction("requests").triggered.connect(lambda: self.libraryAbout("requests"))
+        libsMenu.addAction("pillow").triggered.connect(lambda: self.libraryAbout("pillow"))
+
+        helpMenu.addAction("Список статус кодов").triggered.connect(lambda: self.libraryAbout("statusCodes"))
 
         self.statusBar().showMessage("")
 
@@ -309,7 +332,7 @@ class MainWindow(CustomWindow):
     def libraryAbout(self, lib: str):
         if f"lib_{lib}" in self.back.antiGC:
             return
-        w = LibraryWindow(self, self.back, lib)
+        InfoWindow(self, self.back, lib)
 
     def showAboutWindow(self):
         if "about" in self.back.antiGC:

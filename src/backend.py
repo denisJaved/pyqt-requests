@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox, QListWidgetI
 
 import src.shared_constrains as shared_constraints
 import src.utils as utils
+#import src.secrets_backend as secrets
 
 
 def noneIfStrNull(s: str) -> str | None:
@@ -212,6 +213,7 @@ class AppRequest:
         self.responseBody = utils.Holder({"t": 0, "d": ""})
         self.requestHeaders = HeaderStore(True)
         self.responseHeaders = HeaderStore(False)
+        self.statusCode = "XXX"
 
     @staticmethod
     def fromJSON(data: dict, model):
@@ -219,6 +221,7 @@ class AppRequest:
         req.method = data.get("m", "GET")
         req.url = data.get("url", "http://localhost/")
         req.cookies = CookieStore.fromJSON(data.get("c", {}), model)
+        req.statusCode = data.get("s", "XXX")
         req.requestBody.value = data.get("rqb", {"t": 0, "d": ""})
         req.responseBody.value = data.get("rsb", {"t": 0, "d": ""})
         req.requestHeaders.loadFrom(data.get("rqh", {}))
@@ -231,6 +234,7 @@ class AppRequest:
             "p": "HTTP(S)", # "p" key is reserved for future use to specify protocol of this AppRequest
             "m": self.method,
             "url": self.url,
+            "s": self.statusCode,
             "c": self.cookies.toJSON(),
             "rqb": self.requestBody.value,
             "rsb": self.responseBody.value,
@@ -248,6 +252,10 @@ class AppRequest:
             del self.requestHeaders["Content-Type"]
 
     def execute(self):
+        """
+        Sends this AppRequest using requests library.
+        Data update will be emitted!
+        """
         window = self.model.back.window
         window.statusBar().showMessage("Отправка запроса...")
         # noinspection PyBroadException
@@ -270,6 +278,7 @@ class AppRequest:
                                        cookie.domain, cookie.path, cookie.port,
                                        cookie.comment, cookie.expires)
             self.responseHeaders.loadFrom(resp.headers)
+            self.statusCode = str(resp.status_code)
             body: bytes = resp.content
             contentType = resp.headers.get("content-type", "text/plain")
             try:
@@ -297,6 +306,9 @@ class AppRequest:
 
 
 class AppDataModel:
+    """
+    Dedicated class for storing and managing AppRequests.
+    """
     def __init__(self, back):
         self.requests: list[AppRequest] = []
         self.selectedRequest: int = -1 # index of selected request. Or -1 if no request is selected
@@ -304,6 +316,9 @@ class AppDataModel:
 
     @staticmethod
     def readFile(file: str, back):
+        """
+        Reads AppRequests from a file.
+        """
         model = AppDataModel(back)
         with open(file, "r", encoding="utf-8") as fr:
             data = json.load(fr)
@@ -313,11 +328,17 @@ class AppDataModel:
         return model
 
     def getSelectedRequest(self) -> AppRequest | None:
+        """
+        :return: None is there is no AppRequests or user did not select an AppRequest. Otherwise, it returns the selected AppRequest.
+        """
         if self.selectedRequest == -1:
             return None
         return self.requests[self.selectedRequest]
 
     def savefile(self, file: str):
+        """
+        Saves AppDataModel to a file that can be read again with AppDataModel.readFile.
+        """
         root = {
             "r": [],
             "s": self.selectedRequest
@@ -329,22 +350,41 @@ class AppDataModel:
 
 # noinspection PyMethodMayBeStatic
 class AppBackend:
+    """
+    Root class for interactions with app's backend
+    """
     def __init__(self):
         self.window = None
         self.application: QApplication | None = None
         self.model = AppDataModel(self)
+
+        #self.secretStorage: secrets.SecretsStorage = secrets.SecretsStorage()
+
+        # Used to bypass python's gc when displaying PyQt windows.
+        # Not storing PyQt window will result in gc clearing it
         self.antiGC: dict[str, Any] = {}
 
     def showQtAboutWindow(self):
+        """
+        PyQt event subscriber that displays PyQt's about window.
+        Should be used instead of src.app_about.InfoWindow when displaying information about PyQt.
+        """
         self.application.aboutQt()
 
     def openFile(self):
+        """
+        Shows QFileDialog and opens selected file.
+        AppBacked#openFile only handles the QFileDialog part. For file reading logic view AppBacked#openFile0
+        """
         file = QFileDialog.getOpenFileName(
             self.window, "Выбрать файл", "",
             "DenisJava's WebRequests (*.djwr)")[0]
         self.openFile0(file)
 
     def openFile0(self, file: str):
+        """
+        Updates AppDataModel with selected file.
+        """
         try:
             self.model = AppDataModel.readFile(file, self)
         except KeyError:
@@ -354,6 +394,9 @@ class AppBackend:
         self.emitDataUpdate()
 
     def saveFile(self):
+        """
+        Shows QFileDialog and saves AppDataModel to selected file.
+        """
         file = QFileDialog.getOpenFileName(
             self.window, "Выбрать файл", "",
             "DenisJava's WebRequests (*.djwr)")[0]
